@@ -5,16 +5,18 @@
  *
  * USAGE:
  *   1. Open https://www.kimi.com/ and log in
- *   2. Open the Kimi Picks / skill browser panel so .skill-row elements are visible
+ *   2. Open the Kimi Picks skill browser panel
  *   3. Open DevTools console (F12)
- *   4. Paste this entire script and press Enter
- *   5. Optionally pass a subset list: window._kimiTargets = ["skill-a", "skill-b"]
+ *   4. Optionally set targets: window._kimiTargets = ["skill-a", "skill-b"]
  *      before running, otherwise ALL visible skills are downloaded
+ *   5. Paste this entire script and press Enter
  *   6. Monitor progress: window._kimiDLLog
- *   7. After done=true, run kimi-extract.ps1 to unzip into the repo
+ *   7. After done=true, run kimi-extract.py to unzip into the repo
  *
  * Chrome will ask to allow multiple downloads — click "Allow".
  * A 5.5 s delay between downloads prevents Chrome from blocking them.
+ *
+ * NOTE: Uses .skill-card / .card-name selectors (current Kimi UI as of 2025).
  */
 
 (async () => {
@@ -31,53 +33,88 @@
     poll();
   });
 
-  // Collect skill names to download
-  const allRows = Array.from(document.querySelectorAll('.skill-row'));
-  if (allRows.length === 0) {
-    console.error('[kimi-dl] No .skill-row elements found. Open the skills panel first.');
+  const scrollEl = document.querySelector('.skill-cards-scroll');
+  if (!scrollEl) {
+    console.error('[kimi-dl] No .skill-cards-scroll element found. Open the skills panel first.');
     return;
   }
 
-  const allNames = allRows.map(r => r.querySelector('.skill-name')?.innerText?.trim()).filter(Boolean);
-  const targets = window._kimiTargets?.length ? window._kimiTargets : allNames;
+  // Scroll through to load all lazy-rendered cards
+  scrollEl.scrollTop = 0;
+  await sleep(300);
+  const allNames = new Set();
+  let lastCount = 0;
+  let stableRounds = 0;
+  for (let i = 0; i < 50; i++) {
+    document.querySelectorAll('.card-name').forEach(el => {
+      const t = el.textContent?.trim();
+      if (t) allNames.add(t);
+    });
+    if (allNames.size === lastCount) {
+      stableRounds++;
+      if (stableRounds >= 3) break;
+    } else {
+      stableRounds = 0;
+    }
+    lastCount = allNames.size;
+    scrollEl.scrollTop += 1500;
+    await sleep(400);
+  }
+  scrollEl.scrollTop = 0;
+  await sleep(300);
+
+  const targets = window._kimiTargets?.length ? window._kimiTargets : Array.from(allNames);
+  console.log(`[kimi-dl] Found ${allNames.size} skills total, downloading ${targets.length}...`);
 
   window._kimiDLLog = [];
   window._kimiDLDone = false;
   window._kimiDLCurrent = null;
 
-  console.log(`[kimi-dl] Starting download of ${targets.length} skills...`);
+  const findCard = async (name) => {
+    // Scroll to find the card (lazy rendering means it may not be in DOM yet)
+    scrollEl.scrollTop = 0;
+    await sleep(300);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const cards = Array.from(document.querySelectorAll('.skill-card'));
+      const card = cards.find(c => c.querySelector('.card-name')?.textContent?.trim() === name);
+      if (card) return card;
+      scrollEl.scrollTop += 1500;
+      await sleep(400);
+    }
+    return null;
+  };
 
   const downloadOne = async (name) => {
     window._kimiDLCurrent = name;
 
-    const row = allRows.find(r => r.querySelector('.skill-name')?.innerText?.trim() === name);
-    if (!row) throw new Error('row not found');
+    const card = await findCard(name);
+    if (!card) throw new Error('card not found');
 
-    row.click();
-    await sleep(900);
-
-    const modal = document.querySelector('.skill-preview-modal');
-    if (!modal) throw new Error('modal not found');
+    card.click();
+    await sleep(1000);
 
     // Install skill if not yet added (download zip only appears after installing)
-    const addBtn = modal.querySelector('button.btn-primary');
-    if (addBtn && addBtn.innerText.trim() === 'Add') {
+    const addBtn = Array.from(document.querySelectorAll('button.btn-primary'))
+      .find(b => b.textContent?.trim() === 'Add');
+    if (addBtn) {
       addBtn.click();
       await sleep(3000);
     }
 
-    // Wait for zip download button (only visible after skill is installed)
-    const dlBtn = await waitFor(
-      () => Array.from(modal.querySelectorAll('.action-icon')).find(e => e.querySelector('svg[name="Download"]')),
+    // Wait for download icon in the skill preview modal header
+    const dlIcon = await waitFor(
+      () => Array.from(document.querySelectorAll('.action-icon'))
+             .find(el => el.querySelector('svg[name="Download"]')),
       8000
     );
-    dlBtn.click();
+    dlIcon.click();
 
     // Critical: Chrome blocks rapid successive downloads — must wait ≥5 s
     await sleep(5500);
 
-    const closeBtn = Array.from(modal.querySelectorAll('.action-icon')).find(e => e.querySelector('svg[name="Close"]'));
-    if (closeBtn) closeBtn.click();
+    const closeIcon = Array.from(document.querySelectorAll('.action-icon'))
+      .find(el => el.querySelector('svg[name="Close"]'));
+    if (closeIcon) closeIcon.click();
     await sleep(700);
   };
 

@@ -5,7 +5,8 @@
 ## 目录结构
 
 - `skills/<名称>/` — 每个技能一个目录，`SKILL.md` 为入口文件
-- `scripts/` — 浏览器 JS 片段和 PowerShell 辅助脚本，用于下载与审计技能
+- `scripts/` — 浏览器 JS 片段（供 Agent 通过 chrome-devtools MCP 执行）和 Python 脚本（本地审计与解压）
+- `.claude/skills/kimi-sync.md` — Claude Code 自动加载的技能：完整的 Kimi 技能同步流程
 
 ## 技能来源说明
 
@@ -33,20 +34,23 @@
 
 ## 更新技能流程
 
-详见 `README.md`，简要步骤：
+推荐方式：告诉 Claude Code「用 kimi-sync 技能同步技能」，Claude 会自动通过 chrome-devtools MCP 完成全流程。
 
-1. 浏览器控制台运行 `scripts/kimi-list.js` → 获取当前 Kimi 技能名列表
-2. 运行 `.\scripts\kimi-audit.ps1 -KimiNames "..."` → 查看缺失技能，自动生成 `window._kimiTargets`
-3. 浏览器控制台设置 targets → 运行 `scripts/kimi-download.js` 下载
-4. 运行 `.\scripts\kimi-extract.ps1` 解压
+手动方式（chrome-devtools MCP 执行 JS 片段 + 本地 Python 脚本）：
+1. `evaluate_script` 执行 `scripts/kimi-list.js` → 获取当前 Kimi 技能名列表
+2. `python scripts/kimi-audit.py --kimi-names "..."` → 找出缺失技能，生成 `window._kimiTargets`
+3. `evaluate_script` 注入 targets + 执行 `scripts/kimi-download.js` → 下载 zip
+4. `python scripts/kimi-extract.py` → 解压到 `skills/`
 5. `git add skills && git commit`
+
+完整步骤与时序约束详见 `.claude/skills/kimi-sync.md`。
 
 ## 关键约束
 
 - **zip 下载按钮仅在安装后出现**：需先点击 Add 安装技能才能下载完整 zip 包
 - **5.5 秒下载间隔**：Chrome 会拦截快速连续下载，`kimi-download.js` 中已内置延迟
-- **去重解压**：Chrome 产生的 `skill (1).zip` 重复文件由 `kimi-extract.ps1` 自动处理，只保留最新版本
-- **排除 kimi-cli 技能**：`kimi-audit.ps1` 的 `-ExcludeLocal` 参数已默认排除这 9 个技能
+- **去重解压**：Chrome 产生的 `skill (1).zip` 重复文件由 `kimi-extract.py` 自动处理，只保留最新版本
+- **排除 kimi-cli 技能**：`kimi-audit.py` 的 `KIMI_CLI_SKILLS` 集合已默认排除这 9 个技能
 
 ## Credits 与 License
 
