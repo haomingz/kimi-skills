@@ -45,8 +45,8 @@ skills/
 .claude/skills/
   kimi-sync.md        # Claude Code 自动加载的技能：Kimi 技能同步流程
 scripts/
-  kimi-list.js        # 浏览器片段（供 Agent 通过 evaluate_script 执行）
-  kimi-download.js    # 浏览器片段（供 Agent 通过 evaluate_script 执行）
+  kimi-list.js        # 浏览器片段（供 Agent 通过 Playwright browser_evaluate 执行）
+  kimi-download.js    # 浏览器片段（供 Agent 通过 Playwright browser_evaluate 执行）
   kimi-audit.py       # Python：对比本地与 Kimi 官方，打印缺失清单
   kimi-extract.py     # Python：解压 zip 到 skills/ 目录（含去重）
 ```
@@ -74,19 +74,19 @@ uv run python scripts/kimi-extract.py
 
 ### 方式一（推荐）：让 Agent 自动完成
 
-前提：Claude Code 已启用 chrome-devtools MCP，Chrome 中有 kimi.com 已登录的标签页。
+前提：Claude Code 已启用 Playwright MCP。推荐 `--extension` 模式——直接驱动你本地已登录 kimi.com 的 Chrome（隔离模式则需在 Playwright 打开的独立浏览器里登录一次）。
 
 直接告诉 Agent：
 
 ```
-用 SKILL-sync.md 里的流程，把 kimi.com 上最新的技能同步到本仓库
+用 kimi-sync 技能，把 kimi.com 上最新的技能同步到本仓库
 ```
 
 Agent 会自动：
-1. 用 chrome-devtools MCP 操作浏览器，打开 Kimi Picks 面板
+1. 用 Playwright MCP 打开 `https://www.kimi.com/extensions?tab=skill` 技能页
 2. 执行 `scripts/kimi-list.js` 获取当前技能列表
 3. 调用 `scripts/kimi-audit.py` 找出缺失的技能
-4. 在浏览器中逐一点击 Add → Download，下载缺失的 zip
+4. 在浏览器中逐一通过技能卡的「⋯ 更多 → 下载」下载缺失的 zip
 5. 调用 `scripts/kimi-extract.py` 解压到 `skills/`
 6. `git add skills && git commit`
 
@@ -98,9 +98,11 @@ Agent 会自动：
 
 下面的步骤需要自己操作浏览器，适合不想配置 MCP 的情况。
 
+> `kimi-list.js` / `kimi-download.js` 的文件本体是箭头函数表达式（供 Playwright `browser_evaluate` 直接调用）。在普通开发者工具控制台运行时，需要外包一层括号并立即调用：`(<粘贴内容>)()`。
+
 #### 1. 获取 Kimi 当前技能列表
 
-在 https://www.kimi.com/ 打开 Kimi Picks 技能面板，在开发者工具控制台粘贴并运行 `scripts/kimi-list.js` 的内容，复制输出的逗号分隔名称列表。
+打开 https://www.kimi.com/extensions?tab=skill （技能标签页），在开发者工具控制台运行 `(<scripts/kimi-list.js 内容>)()`，复制输出的逗号分隔名称列表。
 
 #### 2. 审计缺失技能
 
@@ -112,20 +114,21 @@ uv run python scripts/kimi-audit.py --kimi-names "skill-a,skill-b,..."
 
 #### 3. 下载缺失技能
 
-在浏览器控制台（已打开技能面板）中粘贴：
+在浏览器控制台（已打开技能标签页）中粘贴：
 
 ```js
 window._kimiTargets = ["skill-a", "skill-b"];  // 仅缺失的技能
-// 然后粘贴 scripts/kimi-download.js 的全部内容并回车
+(<粘贴 scripts/kimi-download.js 的全部内容>)()
 ```
 
-Chrome 会询问是否允许多文件下载，点击**允许**。每个技能约需 6 秒。
+脚本会逐一通过技能卡的「⋯ 更多 → 下载」菜单下载 zip。若 Chrome 询问是否允许多文件下载，点击**允许**。每个技能约需 6 秒（内置 5.5 秒间隔）。
 
 #### 4. 解压到仓库
 
 ```bash
+# 默认自动定位真实 Downloads 目录（含 Windows 重定向到其他盘的情况，如 F:\Downloads）
 uv run python scripts/kimi-extract.py
-# 如果 Downloads 目录不在默认位置：
+# 如需手动指定（例如 Playwright 隔离模式的 .playwright-mcp 目录）：
 uv run python scripts/kimi-extract.py --downloads-dir "D:/Downloads"
 ```
 
@@ -140,9 +143,10 @@ git commit -m "Sync Kimi skills $(date +%Y-%m-%d)"
 
 ## 技术说明
 
-- **为何需要"添加"技能才能下载 zip？** Kimi 只有在安装（点击 Add）后才会显示整个技能包的 zip 下载按钮；未安装时只能逐文件下载。
-- **为何需要 5.5 秒延迟？** Chrome 会拦截来自同一来源的快速连续下载，≥5 秒的间隔可避免此问题。
-- **去重处理：** Chrome 将重复下载保存为 `skill (1).zip`、`skill (2).zip` 等，`kimi-extract.py`（及 `kimi-extract.ps1`）会自动保留同名最新文件并去重解压。
+- **zip 下载入口在哪？** 当前 Kimi UI（2026）下，下载按钮位于每张技能卡 `.skill-more-btn`（⋯ 更多）弹出的菜单项「下载」中；未安装的技能（按钮显示「安装」）需先点安装。`kimi-download.js` 已内置整套流程。
+- **为何需要 5.5 秒延迟？** 浏览器会拦截/合并来自同一来源的快速连续下载，≥5 秒的间隔可避免此问题。
+- **去重处理：** 浏览器将重复下载保存为 `skill (1).zip`、`skill (2).zip` 等，`kimi-extract.py` 会自动保留同名最新文件并去重解压。
+- **下载落到哪个目录？** Playwright `--extension` 模式驱动真实 Chrome，文件进你正常的下载夹（`kimi-extract.py` 无参自动定位）；隔离模式落到 Playwright 输出目录 `.playwright-mcp/`，解压时用 `--downloads-dir` 指定。
 
 ---
 

@@ -1,2 +1,5 @@
 .claude/*
 !.claude/skills/
+
+# Playwright MCP working dir (snapshots, console logs, isolated-mode downloads)
+.playwright-mcp/

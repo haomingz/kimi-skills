@@ -1,92 +1,102 @@
 ---
 name: kimi-sync
-description: Sync this repo with the latest Kimi official skills. Uses chrome-devtools MCP to operate the Kimi web UI, then calls local Python scripts to audit and extract. Run this skill whenever you need to pull new or updated skills from kimi.com.
+description: Sync this repo with the latest Kimi official skills. Uses the Playwright MCP to operate the Kimi web UI, then calls local Python scripts to audit and extract. Run this skill whenever you need to pull new or updated skills from kimi.com.
 ---
 
 # Kimi Skills Sync
 
-Syncs this repo with the current Kimi official skills list by driving the Kimi web UI via the chrome-devtools MCP, then running local scripts for the diff and extraction.
+Syncs this repo with the current Kimi official skills list by driving the Kimi web UI via the **Playwright MCP**, then running local scripts for the diff and extraction.
 
 ## Prerequisites
 
-- chrome-devtools MCP is available (check with `mcp__chrome-devtools__list_pages`)
-- User is already logged into kimi.com in an open Chrome tab, OR you open one and ask the user to log in
-- Python 3 is available for the audit/extract scripts
-- The repo's `scripts/` folder is present
+- Playwright MCP is available. Tool names depend on how it is wired up:
+  - **`--extension` mode (recommended here):** Playwright drives your **real, logged-in Chrome** through the Playwright Chrome extension. Tools are named `mcp__playwright__browser_*`. You are already logged into kimi.com, and downloads land in your normal Chrome Downloads folder.
+  - **Isolated mode:** Playwright launches its own browser with a separate profile (tools may be named `mcp__plugin_playwright_playwright__browser_*`). You must log into kimi.com inside that browser, and downloads land in Playwright's MCP output dir (e.g. `<repo>\.playwright-mcp\`).
+- Python 3 (via `uv`) is available for the audit/extract scripts.
+- The repo's `scripts/` folder is present.
 
-## Step 1 — Open kimi.com and navigate to the skills panel
+> The steps below use the short tool names (`browser_navigate`, `browser_evaluate`, …). Prefix with the qualified namespace your setup uses (`mcp__playwright__` for extension mode).
+
+## Step 1 — Open the Skills tab
+
+Navigate straight to the Skills tab — far more reliable than hunting for a button:
 
 ```
-mcp__chrome-devtools__navigate_page(url="https://www.kimi.com/")
+browser_navigate(url="https://www.kimi.com/extensions?tab=skill")
 ```
 
-Wait for the page to load. Then find and click the Kimi Picks / skills panel button to make `.skill-row` elements appear in the DOM. Use `take_screenshot` to verify the panel is open before proceeding.
+If a promo/marketing dialog covers the page, dismiss it (`browser_snapshot` to find the close/我知道了 button, then `browser_click`). Confirm the skills grid is loaded and you are logged in with a quick check:
 
-If the user is not logged in, pause and ask them to log in, then continue.
+```
+browser_evaluate(function="() => ({ loggedIn: !document.querySelector('img[alt*=\"用户\"], .login, [class*=\"login\"]') ? 'maybe' : 'check', cards: document.querySelectorAll('.skill-card-title').length })")
+```
+
+You want `cards` > 0. If `cards` is 0: in extension mode you may have landed on the 插件 (Plugins) tab — make sure the URL has `?tab=skill`, or click the **技能** tab button. In isolated mode, a 0 usually means you are not logged in — pause and ask the user to log in, then retry.
 
 ## Step 2 — Scrape the current skill list
 
-Run `scripts/kimi-list.js` via `evaluate_script` to get all skill names currently on the platform:
+Call `browser_evaluate`, passing the **entire contents** of `scripts/kimi-list.js` as the `function` argument. It returns a comma-separated string of every skill name (uses `.skill-card-title`).
 
-```js
-// paste the full contents of scripts/kimi-list.js
-// NOTE: uses .skill-card / .card-name (current Kimi UI); scrolls to load all lazy cards
+```
+browser_evaluate(function="<paste full contents of scripts/kimi-list.js>")
 ```
 
-Paste and run the full contents of `scripts/kimi-list.js` via `evaluate_script`. It scrolls through the entire panel and returns a comma-separated string of all skill names.
-
-Capture the returned comma-separated string. If `null` is returned, the panel is not open — go back to Step 1.
+Capture the returned comma-separated string. If it returns `null`, the Skills tab is not open — go back to Step 1.
 
 ## Step 3 — Audit local vs remote
-
-Pass the scraped names to the audit script:
 
 ```bash
 uv run python scripts/kimi-audit.py --kimi-names "<comma-separated names from Step 2>"
 ```
 
 Parse the output:
-- If "All Kimi skills are present locally" → nothing to do, report to user and stop.
-- Otherwise, collect the missing skill names and the `window._kimiTargets = [...]` snippet.
+- If "All Kimi skills are present locally" → nothing to download; report to the user and stop. (Any "Local only" entries are skills removed from the platform — leave them unless the user asks to prune.)
+- Otherwise collect the missing skill names and the `window._kimiTargets = [...]` snippet it prints.
 
 ## Step 4 — Download missing skills
 
-Still on the kimi.com page with the skills panel open, inject the targets and then run the downloader:
+First set the targets (missing skills only) with one `browser_evaluate`. The `function` must be a function expression, so wrap the assignment:
 
-```js
-// First, set targets (only the missing ones):
-window._kimiTargets = ["skill-a", "skill-b", ...];
+```
+browser_evaluate(function="() => { window._kimiTargets = [\"skill-a\", \"skill-b\"]; return 'ok'; }")
 ```
 
-Then inject and execute the full contents of `scripts/kimi-download.js` via `evaluate_script`.
+(Omit this to download ALL skills shown on the tab.)
 
-**Important timing constraints:**
-- The script has a built-in 5.5 s delay between downloads to avoid Chrome's download throttle — do NOT reduce it.
-- Chrome will show a "Allow multiple downloads?" prompt — use `handle_dialog` or click Allow via `click`.
-- Each skill takes ~7 s total. For N skills, budget N×7 s before checking completion.
-- Poll `window._kimiDLDone` to know when finished:
+Then start the downloader by passing the **entire contents** of `scripts/kimi-download.js` as the `function` argument:
 
-```js
-({ done: window._kimiDLDone, log: window._kimiDLLog })
+```
+browser_evaluate(function="<paste full contents of scripts/kimi-download.js>")
 ```
 
-If any skills failed (e.g. `ok: false` in the log), retry just those by resetting `window._kimiTargets` and re-running the downloader.
+It returns `'started'` immediately and runs the download loop **inside the page** (fire-and-forget). Per skill it: finds the `.skill-card`, installs it first if the button says 安装, then opens the card's **⋯ More** menu (`.skill-more-btn`) and clicks **下载** (`.skill-menu-item`).
+
+**Timing constraints:**
+- A 5.5 s spacing between downloads is built in — do NOT reduce it.
+- Playwright generally permits multiple downloads without prompting. If a real-Chrome "Allow multiple downloads?" prompt or any JS dialog appears, accept it with `browser_handle_dialog(accept=true)`.
+- Budget ~7 s per skill. Poll progress with a separate `browser_evaluate`:
+
+```
+browser_evaluate(function="() => ({ done: window._kimiDLDone, log: window._kimiDLLog, error: window._kimiDLError })")
+```
+
+Wait between polls with `browser_wait_for(time=10)` and re-poll until `done` is `true`. If any entries have `ok:false`, retry just those by re-setting `window._kimiTargets` to that subset and re-running `scripts/kimi-download.js`.
 
 ## Step 5 — Extract zips
 
-Run the extract script. It defaults to `~/Downloads` and looks for zips from the last 4 hours:
+**Extension mode (real Chrome):** downloads land in your normal Downloads folder, so run the extractor with **no flag** — it auto-detects the real Downloads dir (including Windows folders redirected to another drive, e.g. `F:\Downloads`):
 
 ```bash
 uv run python scripts/kimi-extract.py
 ```
 
-If the user's Downloads folder is elsewhere:
+**Isolated mode:** point it at Playwright's output dir instead:
 
 ```bash
-uv run python scripts/kimi-extract.py --downloads-dir "/path/to/Downloads"
+uv run python scripts/kimi-extract.py --downloads-dir "<playwright output dir, e.g. .playwright-mcp>"
 ```
 
-Verify the output says the expected number of skills were extracted.
+Verify the output reports the expected number of skills extracted.
 
 ## Step 6 — Verify and commit
 
@@ -105,7 +115,20 @@ Report the final count and any skills that still failed to the user.
 
 | File | Purpose | How agent uses it |
 |------|---------|-------------------|
-| `scripts/kimi-list.js` | Scrape skill names from Kimi UI | `evaluate_script` in Step 2 |
-| `scripts/kimi-download.js` | Batch-download skill zips via Kimi UI | `evaluate_script` in Step 4 |
+| `scripts/kimi-list.js` | Scrape skill names from the Skills tab | `browser_evaluate` in Step 2 |
+| `scripts/kimi-download.js` | Batch-download skill zips via the ⋯ More → 下载 menu | `browser_evaluate` in Step 4 |
 | `scripts/kimi-audit.py` | Diff local skills vs Kimi list | `bash` in Steps 3 & 6 |
 | `scripts/kimi-extract.py` | Unzip downloads into `skills/` | `bash` in Step 5 |
+
+## Current Kimi UI selectors (2026)
+
+If the scrape/download breaks, the UI likely changed. Re-derive these by inspecting `https://www.kimi.com/extensions?tab=skill`:
+
+| Element | Selector |
+|---------|----------|
+| Skill card | `.skill-card` |
+| Skill name | `.skill-card-title` |
+| Scroll host | `main.skill-page` |
+| Install/Use button | `.skill-card-btn` (text 安装 / 使用) |
+| More (⋯) button | `.skill-more-btn` |
+| More-menu items | `.skill-menu-item` (使用 / 编辑 / 下载 / 删除) inside `.skill-card-more-popover` |
