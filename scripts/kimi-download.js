@@ -1,12 +1,17 @@
 /**
- * Kimi Official Skills Downloader — Playwright MCP form
+ * Kimi Official Skills Downloader
  *
- * Drives the Skills tab on https://www.kimi.com/extensions?tab=skill to download
- * skill zips. Designed to be passed to:
- *   mcp__playwright__browser_evaluate
+ * Drives the Skills tab on https://www.kimi.com/skills to download skill zips.
+ *   - Built-in agent browser: Runtime.evaluate this file as "(<paste>)()"
+ *   - Playwright MCP: pass the entire file as browser_evaluate's function
+ *
+ * Prefer the signed zip URL from getSkillFileTree when the browser cannot save
+ * downloads (typical of an in-agent browser). This menu clicker is the fallback
+ * for a browser that writes zip files to a Downloads folder.
  *
  * USAGE (via Playwright MCP):
- *   1. Open https://www.kimi.com/extensions?tab=skill (logged in).
+ *   1. Open https://www.kimi.com/skills (logged in). Expand section overflow
+ *      rows first so every card is in the DOM.
  *   2. (Optional) pick targets with a separate browser_evaluate:
  *        () => { window._kimiTargets = ["skill-a","skill-b"]; return 'ok'; }
  *      Omit to download ALL skills shown on the tab.
@@ -19,9 +24,10 @@
  *
  * Download flow per skill (current Kimi UI, 2026):
  *   find .skill-card by its .skill-card-title text
- *     -> if its .skill-card-btn says "安装", click to install first
+ *     -> if its install button says "安装", "Add", or "Install", click it first
  *     -> click .skill-more-btn (the "More" ⋯ button)
- *     -> in the .skill-card-more-popover, click the .skill-menu-item whose text is "下载"
+ *     -> click the menu item whose text is "下载" or "Download"
+ *        (.skill-menu-item or .kimi-menu-item)
  * The zip downloads to the browser's normal download folder. In Playwright
  * `--extension` mode that is your real Chrome Downloads dir; in isolated mode it
  * is Playwright's MCP output dir. The 5.5 s spacing avoids Chrome throttling /
@@ -69,21 +75,25 @@
       await sleep(200);
 
       // Install first if not yet added (download only works after install).
-      const primary = card.querySelector('.skill-card-btn');
-      if (primary && primary.textContent.trim() === '安装') {
+      const primary = card.querySelector('.skill-card-btn, .skill-card-use-btn');
+      const primaryLabel = primary && primary.textContent.trim();
+      if (primaryLabel === '安装' || primaryLabel === 'Add' || primaryLabel === 'Install') {
         primary.click();
         await sleep(2500);
       }
 
-      // Open the card's "More" menu and click 下载 (Download).
+      // Open the card's "More" menu and click 下载 / Download.
       const moreBtn = card.querySelector('.skill-more-btn');
       if (!moreBtn) throw new Error('no more button');
       moreBtn.click();
       await sleep(600);
 
-      const dl = Array.from(document.querySelectorAll('.skill-menu-item'))
-        .find(el => el.textContent.trim() === '下载');
-      if (!dl) throw new Error('no 下载 item in more menu');
+      const dl = Array.from(document.querySelectorAll('.skill-menu-item, .kimi-menu-item'))
+        .find(el => {
+          const label = el.textContent.trim();
+          return label === '下载' || label === 'Download';
+        });
+      if (!dl) throw new Error('no 下载/Download item in more menu');
       dl.click();
 
       // Critical: space out downloads so Chrome does not throttle/merge them.

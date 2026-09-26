@@ -1,26 +1,30 @@
 /**
- * Kimi Skills Lister — Playwright MCP form
+ * Kimi Skills Lister
  *
- * Pass the ENTIRE contents of this file as the `function` argument of
- *   mcp__playwright__browser_evaluate
- * while the Skills tab is open at https://www.kimi.com/extensions?tab=skill .
- * It RETURNS a comma-separated string of every skill name (or null if the
- * Skills tab is not open). Pass that string to:  kimi-audit.py --kimi-names "..."
+ * Run this in the page while https://www.kimi.com/skills is open and logged in.
+ *   - Built-in agent browser: browser_cdp Runtime.evaluate, awaitPromise true,
+ *     expression is "(<paste>)()"
+ *   - Playwright MCP: pass the entire file as browser_evaluate's function
+ *   - DevTools console: (<paste>)()
  *
- * To run it in a plain DevTools console instead, wrap and invoke: (<paste>)()
+ * Returns a comma-separated string of every skill name, or null if the Skills
+ * tab is not open. Pass that string to: kimi-audit.py --kimi-names "..."
  *
- * NOTE: Current Kimi UI (2026) selectors —
- *       card        : .skill-card
- *       card title  : .skill-card-title   (was .card-name)
- *       scroll host : main.skill-page     (was .skill-cards-scroll)
- *       All cards normally render at once; the scroll loop is a safety net in
- *       case the list virtualizes for larger catalogs.
+ * Each category first renders about 10 cards. Overflow rows
+ * (button.skill-section-overflow) are expanded before the scroll scrape.
  */
 async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // Skills tab not open / wrong tab.
   if (!document.querySelector('.skill-card-title')) return null;
+
+  for (let round = 0; round < 25; round++) {
+    const more = Array.from(document.querySelectorAll('button.skill-section-overflow'));
+    if (!more.length) break;
+    for (const btn of more) btn.click();
+    await sleep(700);
+  }
 
   const scrollEl = document.querySelector('.skill-page') || document.scrollingElement;
   const names = new Set();

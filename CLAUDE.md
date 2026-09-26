@@ -5,7 +5,7 @@
 ## 目录结构
 
 - `skills/<名称>/` — 每个技能一个目录，`SKILL.md` 为入口文件
-- `scripts/` — 浏览器 JS 片段（供 Agent 通过 Playwright MCP 的 `browser_evaluate` 执行）和 Python 脚本（本地审计与解压）
+- `scripts/` — 浏览器 JS 片段（优先在 Agent 内置浏览器中执行；没有内置浏览器时再用 Playwright MCP 或其他浏览器 MCP）和 Python 脚本（本地审计与解压）
 - `.claude/skills/kimi-sync.md` — Claude Code 自动加载的技能：完整的 Kimi 技能同步流程
 
 ## 技能来源说明
@@ -34,24 +34,22 @@
 
 ## 更新技能流程
 
-推荐方式：告诉 Claude Code「用 kimi-sync 技能同步技能」，Claude 会自动通过 Playwright MCP 完成全流程。
+推荐方式：告诉 Agent「用 kimi-sync 技能同步技能」。浏览器按这个顺序选：
 
-手动方式（Playwright MCP 执行 JS 片段 + 本地 Python 脚本）：
-1. `browser_navigate` 打开 `https://www.kimi.com/extensions?tab=skill`（技能标签页）
-2. `browser_evaluate` 执行 `scripts/kimi-list.js` → 获取当前 Kimi 技能名列表
-3. `python scripts/kimi-audit.py --kimi-names "..."` → 找出缺失技能，生成 `window._kimiTargets`
-4. `browser_evaluate` 注入 targets + 执行 `scripts/kimi-download.js` → 下载 zip
-5. `python scripts/kimi-extract.py` → 解压到 `skills/`
-6. `git add skills && git commit`
+1. **Agent 内置浏览器**（优先，例如 Cursor 的 `browser_navigate` / `browser_cdp`）
+2. 没有内置浏览器时，再用 **Playwright MCP**（`--extension` 驱动本机已登录 Chrome；隔离模式需在该浏览器里登录）
+3. 再没有，就用其他能打开页面并执行 JS 的浏览器 MCP
 
-> **Playwright 模式**：`--extension` 模式驱动你本地已登录的 Chrome（工具名 `mcp__playwright__browser_*`，下载落到真实 Chrome 下载夹）；隔离模式则用独立浏览器（需在其中登录，下载落到 `.playwright-mcp/`）。
+页面地址是 `https://www.kimi.com/skills`。内置浏览器用 `Runtime.evaluate` 跑 `scripts/kimi-list.js`；Playwright 用 `browser_evaluate`。随后 `kimi-audit.py` 对名称，再按文件树比对内容，下载缺失或有更新的 zip，解压到 `skills/`。
+
+> Playwright `--extension` 的下载进真实 Chrome 下载夹；隔离模式进 `.playwright-mcp/`。内置浏览器往往不能把文件存进系统下载夹，改用页面返回的签名 zip URL，用 `curl` 下载。
 
 完整步骤与时序约束详见 `.claude/skills/kimi-sync.md`。
 
 ## 关键约束
 
-- **下载入口在「⋯ 更多」菜单**：当前 Kimi UI（2026）下，每张技能卡的下载按钮位于卡片 `.skill-more-btn`（⋯ 更多）弹出的菜单项「下载」中；未安装的技能（按钮显示「安装」）需先点安装。`kimi-download.js` 已内置这套流程。
-- **当前 UI 选择器**：卡片 `.skill-card`、名称 `.skill-card-title`、滚动容器 `main.skill-page`、更多菜单项 `.skill-menu-item`。UI 改版导致抓取/下载失效时，对照 `.claude/skills/kimi-sync.md` 末尾的选择器表重新确认。
+- **下载入口在「⋯ 更多」菜单**：菜单项文案是「下载」或 Download。未添加的技能（按钮为「安装」/ Add）需先添加。内置浏览器优先走签名 zip URL，菜单点击是给能保存下载文件的浏览器用的后备。
+- **分类默认只渲染约 10 张卡片**：抓列表前要点 `button.skill-section-overflow`（View … more），`kimi-list.js` 已内置。选择器改版时对照 `.claude/skills/kimi-sync.md` 末尾的表。
 - **5.5 秒下载间隔**：浏览器会拦截/合并快速连续下载，`kimi-download.js` 中已内置延迟
 - **去重解压**：浏览器产生的 `skill (1).zip` 重复文件由 `kimi-extract.py` 自动处理，只保留最新版本
 - **下载目录随模式而变**：`--extension` 模式下载落到真实 Chrome 下载夹（`kimi-extract.py` 无参即可，注册表自动定位，支持 `F:\Downloads` 这类重定向）；隔离模式落到 `.playwright-mcp/`（需 `--downloads-dir` 指定）
