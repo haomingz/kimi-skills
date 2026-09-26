@@ -42,8 +42,8 @@ skills/
     references/       # optional reference docs
     scripts/          # optional helper scripts
     ...
-.claude/skills/
-  kimi-sync.md        # sync procedure loaded by Claude Code
+.agents/skills/
+  kimi-sync/SKILL.md  # sync skill (shared Agent Skills layout)
 scripts/
   kimi-list.js        # in-page script: collect skill names
   kimi-download.js    # in-page script: download skill zips from the card menu
@@ -85,7 +85,7 @@ The agent picks a browser in this order:
 2. **Playwright MCP**, if there is no built-in browser. Extension mode drives your already logged-in Chrome; isolated mode needs a login inside that browser.
 3. Any other browser MCP that can open a page and run JavaScript in it.
 
-It then opens `https://www.kimi.com/skills`, expands every category, diffs names and file contents against `skills/`, downloads what is missing or changed, and extracts the zips. Details: [.claude/skills/kimi-sync.md](.claude/skills/kimi-sync.md).
+It then opens `https://www.kimi.com/skills`, expands every category, diffs names and file contents against `skills/`, downloads what is missing or changed, and extracts the zips. Details: [.agents/skills/kimi-sync/SKILL.md](.agents/skills/kimi-sync/SKILL.md).
 
 ---
 
@@ -155,7 +155,7 @@ git commit -m "Sync Kimi skills $(date +%Y-%m-%d)"
 
 ## License
 
-The **scripts** in `scripts/` and the **docs** (`README.md`, `README.zh-CN.md`, `CLAUDE.md`) are under the [MIT License](https://opensource.org/licenses/MIT).
+The **scripts** in `scripts/` and the **docs** (`README.md`, `README.zh-CN.md`, `AGENTS.md`) are under the [MIT License](https://opensource.org/licenses/MIT).
 
 Skills under `skills/` keep their original authors' copyright. Read the `LICENSE` file in each directory. Skills with no license file are all rights reserved and come from the Kimi platform.
 
